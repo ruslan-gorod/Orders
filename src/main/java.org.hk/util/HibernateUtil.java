@@ -1,4 +1,4 @@
-package org.hk.util;
+package util;
 
 import org.hibernate.SessionFactory;
 import org.hibernate.boot.Metadata;
