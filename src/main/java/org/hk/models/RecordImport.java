@@ -1,4 +1,4 @@
-package models;
+package org.hk.models;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -10,6 +10,7 @@ import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.Transient;
 import java.time.LocalDate;
 
 @Data
@@ -30,14 +31,20 @@ public class RecordImport {
     private String originDocument;
     @Column(name = "compareDocument")
     private String compareDocument;
+    @Column(name = "criteriaDocument")
+    private String criteriaDocument;
     @Column(name = "date")
     private LocalDate date;
     @Column(name = "count")
     private double count;
+    @Column(name = "countResult")
+    private double countResult;
     @Column(name = "sum")
     private double sum;
     @Column(name = "product")
     private String product;
+    @Column(name = "partner")
+    private String partner;
+    @Transient
     private Content content;
 }
-
