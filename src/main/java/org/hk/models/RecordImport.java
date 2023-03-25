@@ -12,6 +12,8 @@ import javax.persistence.GenerationType;
 import javax.persistence.Id;
 import javax.persistence.Transient;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @Entity
@@ -47,4 +49,6 @@ public class RecordImport {
     private String partner;
     @Transient
     private Content content;
+    @Transient
+    private List<Raw> rawList = new ArrayList<>();
 }

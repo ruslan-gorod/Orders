@@ -85,7 +85,7 @@ public class ReadFromExcel {
         Content content = new Content();
         String dt = getStringCellValueByPosition(r, 3);
         String kt = getStringCellValueByPosition(r, 4);
-        if (RAH_201.equals(dt) && RAH_632.equals(kt)) {
+        if (RAH_201.equals(dt) && RAH_632.equals(kt) && !value.toUpperCase().contains("СІЛЬ")) {
             content.setProduct(recordValue[2]);
             content.setDocument(recordValue[3]);
             content.setCriteria(recordValue[3]);

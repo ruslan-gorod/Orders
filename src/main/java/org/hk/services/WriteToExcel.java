@@ -13,16 +13,22 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.hibernate.Session;
 import org.hk.dao.WorkWithDB;
 import org.hk.models.QueryParameters;
+import org.hk.models.Raw;
 import org.hk.models.RecordImport;
 import org.hk.util.HibernateUtil;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.stream.IntStream;
+import java.util.Map;
+import java.util.Set;
 
 import static org.hk.util.Helper.DIR_IMP;
 import static org.hk.util.Helper.RAH_201;
@@ -35,8 +41,11 @@ import static org.hk.util.Helper.deleteFile;
 public class WriteToExcel {
 
     private static final List<RecordImport> reportData = new ArrayList<>();
+    private static final Map<String, RecordImport> writtenRecords = new HashMap<>();
     private static final QueryParameters parameters = new QueryParameters();
+    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final String FILE_SEPARATOR = "/";
+    private static final String DASH = " - ";
     private static final String SUFFIX = ".xlsx";
 
     public static void write() {
@@ -45,16 +54,24 @@ public class WriteToExcel {
     }
 
     private static void createAndSaveReport() {
-        getRecords().stream().forEach(WriteToExcel::saveReport);
+        getRecords().stream().filter(r -> r.getProduct() != null).forEach(WriteToExcel::saveReport);
     }
 
     private static void saveReport(RecordImport recordImport) {
         parameters.setDt(RAH_23);
         parameters.setKt(RAH_201);
-        List<RecordImport> records = getRecordsByDocument(recordImport.getCompareDocument());
+        String document = recordImport.getCompareDocument();
+        List<RecordImport> records = getRecordsByDocument(document);
         createReportData(records);
+
+        RecordImport writtenRecord = writtenRecords.get(document);
+        recordImport.getRawList().add(new Raw(recordImport.getProduct(), recordImport.getCount()));
+        if (writtenRecord == null) {
+            writtenRecords.put(document, recordImport);
+        } else {
+            recordImport.getRawList().add(new Raw(writtenRecord.getProduct(), writtenRecord.getCount()));
+        }
         writeReportsToExcelFile(recordImport);
-        System.out.println(recordImport.getOriginDocument() + " - " + recordImport.getDate());
     }
 
     private static void createReportData(List<RecordImport> records) {
@@ -126,8 +143,8 @@ public class WriteToExcel {
     private static void saveReportToExcel(FileOutputStream fos, RecordImport recordImport) {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             XSSFSheet sheet = workbook.createSheet(DIR_IMP);
-            createReportHeader(sheet, recordImport);
-            int rowNumber = addRowsToReport(sheet, recordImport);
+            double sum = createReportHeader(sheet, recordImport);
+            int rowNumber = addRowsToReport(sheet, recordImport, sum);
             createReportFooter(rowNumber, sheet);
             workbook.write(fos);
         } catch (IOException e) {
@@ -142,7 +159,8 @@ public class WriteToExcel {
         }
     }
 
-    private static void createReportHeader(XSSFSheet sheet, RecordImport recordImport) {
+    private static double createReportHeader(XSSFSheet sheet, RecordImport recordImport) {
+        double sum = 0.0;
         Row row0 = sheet.createRow(0);
         Cell cell00 = row0.createCell(0);
         Cell cell02 = row0.createCell(2);
@@ -165,81 +183,152 @@ public class WriteToExcel {
         cell14.setCellValue("Місько В.І.");
         cell14.setCellStyle(styleBold);
 
+        Row row3 = sheet.createRow(3);
+        Cell cell30 = row3.createCell(0);
+        cell30.setCellValue("Акт переробки сировини");
+        CellStyle styleCenter30 = cell30.getSheet().getWorkbook().createCellStyle();
+        setCenterInStyle(styleCenter30);
+        XSSFFont fontBold30 = (XSSFFont) cell30.getSheet().getWorkbook().createFont();
+        fontBold30.setBold(true);
+        fontBold30.setFontHeight(16.0);
+        styleCenter30.setFont(fontBold30);
+        cell30.setCellStyle(styleCenter30);
+
+        sheet.addMergedRegion(new CellRangeAddress(3, 3, 0, 5));
+
+        Row row4 = sheet.createRow(4);
+        Cell cell40 = row4.createCell(0);
+        cell40.setCellValue(recordImport.getPartner());
+
         Row row5 = sheet.createRow(5);
         Cell cell50 = row5.createCell(0);
-        cell50.setCellValue("Акт переробки сировини");
-        CellStyle styleCenter50 = cell50.getSheet().getWorkbook().createCellStyle();
-        setCenterInStyle(styleCenter50);
-        XSSFFont fontBold50 = (XSSFFont) cell50.getSheet().getWorkbook().createFont();
-        fontBold50.setBold(true);
-        fontBold50.setFontHeight(14.0);
-        styleCenter50.setFont(fontBold);
-        cell50.setCellStyle(styleCenter50);
-
-        sheet.addMergedRegion(new CellRangeAddress(5, 5, 0, 5));
-
-        Row row6 = sheet.createRow(6);
-        Cell cell60 = row6.createCell(0);
-        cell60.setCellValue(recordImport.getPartner());
+        cell50.setCellValue(recordImport.getOriginDocument());
+        Cell cell53 = row5.createCell(3);
+        cell53.setCellValue("Дата переробки");
 
         Row row7 = sheet.createRow(7);
-        Cell cell70 = row7.createCell(0);
-        cell70.setCellValue(recordImport.getOriginDocument());
         Cell cell73 = row7.createCell(3);
-        cell73.setCellValue("Дата переробки");
+        cell73.setCellValue("Комплекти (по входу)");
+
+        List<Raw> rawList = recordImport.getRawList();
 
         Row row8 = sheet.createRow(8);
         Cell cell80 = row8.createCell(0);
-        cell80.setCellValue("Дата входу");
-        Cell cell81 = row8.createCell(1);
-        cell81.setCellValue(recordImport.getDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")));
-        //TODO need add developing dates to cell84
+        cell80.setCellValue(rawList.get(0).getRaw());
+        Cell cell85 = row8.createCell(5);
+        cell85.setCellValue(rawList.get(0).getCount());
+        sum += rawList.get(0).getCount();
+        if (rawList.size() > 1) {
+            Row row9 = sheet.createRow(9);
+            Cell cell90 = row9.createCell(0);
+            cell90.setCellValue(rawList.get(1).getRaw());
+            Cell cell95 = row9.createCell(5);
+            cell95.setCellValue(rawList.get(1).getCount());
+            sum += rawList.get(1).getCount();
+        }
 
-        Row row10 = sheet.createRow(10);
-        Cell cell100 = row10.createCell(0);
-        cell100.setCellValue("Комплекти (фактично)");
-        Cell cell102 = row10.createCell(2);
-        cell102.setCellValue("Комплекти (по входу)");
-        Cell cell105 = row10.createCell(5);
-        cell105.setCellValue(recordImport.getCount());
+        Row row100 = sheet.createRow(10);
+        Cell cell100 = row100.createCell(0);
+        Cell cell101 = row100.createCell(1);
+        Cell cell102 = row100.createCell(2);
+        Cell cell103 = row100.createCell(3);
+        Cell cell104 = row100.createCell(4);
+        Cell cell105 = row100.createCell(5);
 
-        Row row120 = sheet.createRow(12);
-        Cell cell120 = row120.createCell(0);
-        Cell cell121 = row120.createCell(1);
-        Cell cell122 = row120.createCell(2);
-        Cell cell123 = row120.createCell(3);
-        Cell cell124 = row120.createCell(4);
-        Cell cell125 = row120.createCell(5);
-
-        CellStyle styleCenter120 = cell70.getSheet().getWorkbook().createCellStyle();
-        setCenterInStyle(styleCenter120);
-        styleCenter120.setBorderBottom(BorderStyle.MEDIUM);
-        styleCenter120.setBorderTop(BorderStyle.MEDIUM);
-        styleCenter120.setBorderLeft(BorderStyle.MEDIUM);
-        styleCenter120.setBorderRight(BorderStyle.MEDIUM);
-        cell120.setCellValue("Калібр");
-        cell120.setCellStyle(styleCenter120);
-        cell121.setCellValue("довжина, м");
-        cell121.setCellStyle(styleCenter120);
-        cell122.setCellValue("позначки");
-        cell122.setCellStyle(styleCenter120);
-        cell123.setCellValue("Всього");
-        cell123.setCellStyle(styleCenter120);
-        cell124.setCellValue("м.");
-        cell124.setCellStyle(styleCenter120);
-        cell125.setCellValue("кг");
-        cell125.setCellStyle(styleCenter120);
+        CellStyle styleCenter100 = cell50.getSheet().getWorkbook().createCellStyle();
+        setCenterInStyle(styleCenter100);
+        styleCenter100.setBorderBottom(BorderStyle.MEDIUM);
+        styleCenter100.setBorderTop(BorderStyle.MEDIUM);
+        styleCenter100.setBorderLeft(BorderStyle.MEDIUM);
+        styleCenter100.setBorderRight(BorderStyle.MEDIUM);
+        cell100.setCellValue("Калібр");
+        cell100.setCellStyle(styleCenter100);
+        cell101.setCellValue("довжина, м");
+        cell101.setCellStyle(styleCenter100);
+        cell102.setCellValue("позначки");
+        cell102.setCellStyle(styleCenter100);
+        cell103.setCellValue("Всього вихід");
+        cell103.setCellStyle(styleCenter100);
+        cell104.setCellValue("м.");
+        cell104.setCellStyle(styleCenter100);
+        cell105.setCellValue("кг");
+        cell105.setCellStyle(styleCenter100);
+        return sum;
     }
 
-    private static int addRowsToReport(XSSFSheet sheet, RecordImport recordImport) {
-//TODO need add developing dates to cell84
-        return 13;
+    private static int addRowsToReport(XSSFSheet sheet, RecordImport recordImport, double sum) {
+        int position = 11;
+        double allCount = 0.0;
+        Set<LocalDate> dates = new HashSet<>();
+        String noInfo = recordImport.getOriginDocument() + DASH
+                + recordImport.getDate() + DASH + recordImport.getProduct();
+        for (RecordImport report : reportData) {
+            Row row = sheet.createRow(position++);
+            Cell cell0 = row.createCell(0);
+            Cell cell1 = row.createCell(1);
+            Cell cell2 = row.createCell(2);
+            Cell cell3 = row.createCell(3);
+            Cell cell4 = row.createCell(4);
+            Cell cell5 = row.createCell(5);
+
+            cell0.setCellValue(report.getProduct());
+            cell3.setCellValue(report.getCountResult());
+            cell5.setCellValue(report.getCount());
+
+            cell0.setCellStyle(getCellStyle(cell0));
+            cell1.setCellStyle(getCellStyle(cell1));
+            cell2.setCellStyle(getCellStyle(cell2));
+            cell3.setCellStyle(getCellStyle(cell3));
+            cell4.setCellStyle(getCellStyle(cell4));
+            cell5.setCellStyle(getCellStyle(cell5));
+
+            allCount += report.getCount();
+            dates.add(report.getDate());
+            noInfo = report.getOriginDocument() + DASH + report.getDate();
+        }
+        Row row = sheet.createRow(position++);
+        Cell cell0 = row.createCell(0);
+        Cell cell1 = row.createCell(1);
+        Cell cell2 = row.createCell(2);
+        Cell cell3 = row.createCell(3);
+        Cell cell4 = row.createCell(4);
+        Cell cell5 = row.createCell(5);
+
+        cell0.setCellValue("ВСЬОГО");
+        cell5.setCellValue(allCount);
+
+        cell0.setCellStyle(getCellStyle(cell0));
+        cell1.setCellStyle(getCellStyle(cell1));
+        cell2.setCellStyle(getCellStyle(cell2));
+        cell3.setCellStyle(getCellStyle(cell3));
+        cell4.setCellStyle(getCellStyle(cell4));
+        cell5.setCellStyle(getCellStyle(cell5));
+
+        Row row6 = sheet.createRow(6);
+        Cell cell60 = row6.createCell(0);
+        cell60.setCellValue("Дата входу");
+        Cell cell61 = row6.createCell(1);
+        cell61.setCellValue(recordImport.getDate().format(formatter));
+
+        Row rowLast = sheet.createRow(1 + position);
+        Cell cellLast = rowLast.createCell(0);
+        cellLast.setCellValue("Технологічні відходи в т.ч. сіль");
+        Cell cellSumLast = rowLast.createCell(5);
+        cellSumLast.setCellValue(sum - allCount);
+
+        if (dates.size() > 0) {
+            String first = dates.stream().min(Comparator.naturalOrder()).get().format(formatter);
+            String last = dates.stream().max(Comparator.naturalOrder()).get().format(formatter);
+            Cell cellDates = row6.createCell(3);
+            cellDates.setCellValue(first + "-" + last);
+            sheet.addMergedRegion(new CellRangeAddress(6, 6, 3, 4));
+        } else {
+            System.out.println("no data: " + noInfo);
+        }
+        return ++position;
     }
 
     private static void createReportFooter(int rowNumber, XSSFSheet sheet) {
-        Row row = sheet.createRow(rowNumber);
-        Cell cell0 = row.createCell(0);
-
         Row rowPrepared = sheet.createRow(rowNumber + 2);
         Cell preparedCell = rowPrepared.createCell(0);
         preparedCell.setCellValue("Заступник директора по виробництву");
@@ -259,7 +348,12 @@ public class WriteToExcel {
         firstPerson.setCellStyle(styleBold);
         reviewCell.setCellStyle(styleBold);
 
-        IntStream.range(0, 5).forEach(sheet::autoSizeColumn);
+        sheet.setColumnWidth(0, 9960);
+        sheet.setColumnWidth(1, 3140);
+        sheet.setColumnWidth(2, 3140);
+        sheet.setColumnWidth(3, 3430);
+        sheet.setColumnWidth(4, 1450);
+        sheet.setColumnWidth(5, 2280);
 
         sheet.getPrintSetup().setLandscape(true);
         sheet.setFitToPage(true);
