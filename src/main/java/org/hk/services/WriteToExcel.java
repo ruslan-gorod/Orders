@@ -207,6 +207,8 @@ public class WriteToExcel {
         cell53.setCellValue("Дата переробки");
 
         Row row7 = sheet.createRow(7);
+        Cell cell70 = row7.createCell(0);
+        cell70.setCellValue("Бочки");
         Cell cell73 = row7.createCell(3);
         cell73.setCellValue("Комплекти (по входу)");
 
@@ -245,7 +247,7 @@ public class WriteToExcel {
         cell100.setCellStyle(styleCenter100);
         cell101.setCellValue("довжина, м");
         cell101.setCellStyle(styleCenter100);
-        cell102.setCellValue("позначки");
+        cell102.setCellValue("дата");
         cell102.setCellStyle(styleCenter100);
         cell103.setCellValue("Всього вихід");
         cell103.setCellStyle(styleCenter100);
@@ -272,6 +274,7 @@ public class WriteToExcel {
             Cell cell5 = row.createCell(5);
 
             cell0.setCellValue(report.getProduct());
+            cell2.setCellValue(report.getDate().format(formatter));
             cell3.setCellValue(report.getCountResult());
             cell5.setCellValue(report.getCount());
 
