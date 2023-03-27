@@ -15,6 +15,7 @@ import org.hk.dao.WorkWithDB;
 import org.hk.models.QueryParameters;
 import org.hk.models.Raw;
 import org.hk.models.RecordImport;
+import org.hk.util.Helper;
 import org.hk.util.HibernateUtil;
 
 import java.io.File;
@@ -44,13 +45,14 @@ public class WriteToExcel {
     private static final Map<String, RecordImport> writtenRecords = new HashMap<>();
     private static final QueryParameters parameters = new QueryParameters();
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private static final Set<String> filesToDelete = new HashSet<>();
     private static final String FILE_SEPARATOR = "/";
-    private static final String DASH = " - ";
     private static final String SUFFIX = ".xlsx";
 
     public static void write() {
         deleteFile(new File(DIR_IMP));
         createAndSaveReport();
+        filesToDelete.parallelStream().map(File::new).forEach(Helper::deleteFile);
     }
 
     private static void createAndSaveReport() {
@@ -124,7 +126,7 @@ public class WriteToExcel {
         try {
             File file = getFileReportToSave(recordImport);
             FileOutputStream fos = new FileOutputStream(file);
-            saveReportToExcel(fos, recordImport);
+            saveReportToExcel(fos, recordImport, file.getAbsolutePath());
             fos.flush();
             fos.close();
         } catch (IOException e) {
@@ -140,11 +142,11 @@ public class WriteToExcel {
         return new File(folderName + FILE_SEPARATOR + recordImport.getOriginDocument() + SUFFIX);
     }
 
-    private static void saveReportToExcel(FileOutputStream fos, RecordImport recordImport) {
+    private static void saveReportToExcel(FileOutputStream fos, RecordImport recordImport, String fileName) {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             XSSFSheet sheet = workbook.createSheet(DIR_IMP);
             double sum = createReportHeader(sheet, recordImport);
-            int rowNumber = addRowsToReport(sheet, recordImport, sum);
+            int rowNumber = addRowsToReport(sheet, recordImport, sum, fileName);
             createReportFooter(rowNumber, sheet);
             workbook.write(fos);
         } catch (IOException e) {
@@ -258,12 +260,10 @@ public class WriteToExcel {
         return sum;
     }
 
-    private static int addRowsToReport(XSSFSheet sheet, RecordImport recordImport, double sum) {
+    private static int addRowsToReport(XSSFSheet sheet, RecordImport recordImport, double sum, String fileName) {
         int position = 11;
         double allCount = 0.0;
         Set<LocalDate> dates = new HashSet<>();
-        String noInfo = recordImport.getOriginDocument() + DASH
-                + recordImport.getDate() + DASH + recordImport.getProduct();
         for (RecordImport report : reportData) {
             Row row = sheet.createRow(position++);
             Cell cell0 = row.createCell(0);
@@ -287,7 +287,6 @@ public class WriteToExcel {
 
             allCount += report.getCount();
             dates.add(report.getDate());
-            noInfo = report.getOriginDocument() + DASH + report.getDate();
         }
         Row row = sheet.createRow(position++);
         Cell cell0 = row.createCell(0);
@@ -326,7 +325,8 @@ public class WriteToExcel {
             cellDates.setCellValue(first + "-" + last);
             sheet.addMergedRegion(new CellRangeAddress(6, 6, 3, 4));
         } else {
-            System.out.println("no data: " + noInfo);
+            System.out.println("no data in file: " + fileName);
+            filesToDelete.add(fileName);
         }
         return ++position;
     }
