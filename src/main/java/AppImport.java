@@ -1,6 +1,7 @@
 import org.hk.dao.WorkWithDB;
 import org.hk.services.ReadFromExcel;
 import org.hk.services.WriteToExcel;
+import org.hk.util.HibernateUtil;
 
 import java.time.LocalDateTime;
 
@@ -16,6 +17,6 @@ public class AppImport {
         System.out.println("Completed");
 
         printTime(startLocalDateTime);
-        System.exit(0);
+        HibernateUtil.shutdown();
     }
 }

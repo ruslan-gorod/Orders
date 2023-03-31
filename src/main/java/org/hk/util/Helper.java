@@ -8,8 +8,6 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public class Helper {
-    public static final String DELIMITER = "|";
-    public static final String DIR_UA = "ordersUA";
     public static final String DIR_IMP = "ordersIMP";
     public static final String CEH = "цех замочування";
     public static final String RAH_201 = "201";

@@ -12,6 +12,7 @@ import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.hibernate.Session;
 import org.hk.dao.WorkWithDB;
+import org.hk.models.OrderReport;
 import org.hk.models.QueryParameters;
 import org.hk.models.Raw;
 import org.hk.models.RecordImport;
@@ -23,26 +24,18 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.hk.util.Helper.DIR_IMP;
 import static org.hk.util.Helper.RAH_201;
-import static org.hk.util.Helper.RAH_23;
-import static org.hk.util.Helper.RAH_25;
-import static org.hk.util.Helper.RAH_26;
 import static org.hk.util.Helper.RAH_632;
 import static org.hk.util.Helper.deleteFile;
 
 public class WriteToExcel {
 
-    private static final List<RecordImport> reportData = new ArrayList<>();
-    private static final Map<String, RecordImport> writtenRecords = new HashMap<>();
     private static final QueryParameters parameters = new QueryParameters();
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final Set<String> filesToDelete = new HashSet<>();
@@ -52,55 +45,18 @@ public class WriteToExcel {
     public static void write() {
         deleteFile(new File(DIR_IMP));
         createAndSaveReport();
+        filesToDelete.forEach(System.out::println);
         filesToDelete.parallelStream().map(File::new).forEach(Helper::deleteFile);
     }
 
     private static void createAndSaveReport() {
-        getRecords().stream().filter(r -> r.getProduct() != null).forEach(WriteToExcel::saveReport);
+        getRecords().parallelStream().filter(r -> r.getProduct() != null).forEach(WriteToExcel::saveReport);
     }
 
     private static void saveReport(RecordImport recordImport) {
-        parameters.setDt(RAH_23);
-        parameters.setKt(RAH_201);
-        String document = recordImport.getCompareDocument();
-        List<RecordImport> records = getRecordsByDocument(document);
-        createReportData(records);
-
-        RecordImport writtenRecord = writtenRecords.get(document);
-        recordImport.getRawList().add(new Raw(recordImport.getProduct(), recordImport.getCount()));
-        if (writtenRecord == null) {
-            writtenRecords.put(document, recordImport);
-        } else {
-            recordImport.getRawList().add(new Raw(writtenRecord.getProduct(), writtenRecord.getCount()));
-        }
-        writeReportsToExcelFile(recordImport);
-    }
-
-    private static void createReportData(List<RecordImport> records) {
-        reportData.clear();
-        records.forEach(record -> {
-            parameters.setDt(RAH_23);
-            parameters.setKt(RAH_25);
-            reportData.addAll(getRecordsByDocument(record.getCompareDocument()));
-            parameters.setDt(RAH_201);
-            parameters.setKt(RAH_25);
-            reportData.addAll(getRecordsByDocument(record.getCompareDocument()));
-            setProductNameAndCountResult();
-        });
-    }
-
-    private static void setProductNameAndCountResult() {
-        reportData.forEach(rec -> {
-            parameters.setDt(RAH_26);
-            parameters.setKt(RAH_23);
-            List<RecordImport> names = getRecordsByDocument(rec.getCompareDocument());
-            if (names.size() > 0) {
-                if (rec.getProduct() == null) {
-                    rec.setProduct(names.get(0).getProduct());
-                }
-                rec.setCountResult(names.get(0).getCount());
-            }
-        });
+        Session session = HibernateUtil.getSessionFactory().openSession();
+        writeReportsToExcelFile(new OrderReport(recordImport, session));
+        session.close();
     }
 
     private static List<RecordImport> getRecords() {
@@ -113,28 +69,8 @@ public class WriteToExcel {
         return recordsByDtKt;
     }
 
-    private static List<RecordImport> getRecordsByDocument(String doc) {
-        Session session = HibernateUtil.getSessionFactory().openSession();
-        parameters.setSession(session);
-        parameters.setDocument(doc);
-        List<RecordImport> recordsByDtKt = WorkWithDB.getRecordsByDtKtAndCriteria(parameters);
-        session.close();
-        return recordsByDtKt;
-    }
-
-    private static void writeReportsToExcelFile(RecordImport recordImport) {
-        try {
-            File file = getFileReportToSave(recordImport);
-            FileOutputStream fos = new FileOutputStream(file);
-            saveReportToExcel(fos, recordImport, file.getAbsolutePath());
-            fos.flush();
-            fos.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static File getFileReportToSave(RecordImport recordImport) {
+    private static File getFileReportToSave(OrderReport report) {
+        RecordImport recordImport = report.getRecordImport();
         int year = recordImport.getDate().getYear();
         int monthValue = recordImport.getDate().getMonthValue();
         String folderName = DIR_IMP + FILE_SEPARATOR + year + FILE_SEPARATOR + monthValue;
@@ -142,16 +78,23 @@ public class WriteToExcel {
         return new File(folderName + FILE_SEPARATOR + recordImport.getOriginDocument() + SUFFIX);
     }
 
-    private static void saveReportToExcel(FileOutputStream fos, RecordImport recordImport, String fileName) {
-        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-            XSSFSheet sheet = workbook.createSheet(DIR_IMP);
-            double sum = createReportHeader(sheet, recordImport);
-            int rowNumber = addRowsToReport(sheet, recordImport, sum, fileName);
-            createReportFooter(rowNumber, sheet);
+    private static void writeReportsToExcelFile(OrderReport report) {
+        report.setFile(getFileReportToSave(report));
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             FileOutputStream fos = new FileOutputStream(report.getFile())) {
+            report.setSheet(workbook.createSheet(DIR_IMP));
+            insertDataIntoExcelFile(report);
             workbook.write(fos);
+            fos.flush();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static void insertDataIntoExcelFile(OrderReport report) {
+        createReportHeader(report);
+        addRowsToReport(report);
+        createReportFooter(report);
     }
 
     private static void createReportFolder(String folderName) {
@@ -161,9 +104,12 @@ public class WriteToExcel {
         }
     }
 
-    private static double createReportHeader(XSSFSheet sheet, RecordImport recordImport) {
+    private static void createReportHeader(OrderReport report) {
+        XSSFSheet sheet = report.getSheet();
+        RecordImport recordImport = report.getRecordImport();
         double sum = 0.0;
-        Row row0 = sheet.createRow(0);
+        int position = report.getRowNumber();
+        Row row0 = sheet.createRow(position++);
         Cell cell00 = row0.createCell(0);
         Cell cell02 = row0.createCell(2);
         cell00.setCellValue("ТзОВ \"Хінкель-Когут\"");
@@ -177,15 +123,16 @@ public class WriteToExcel {
         cell00.setCellStyle(styleBold);
         cell02.setCellStyle(styleBold);
 
-        Row row1 = sheet.createRow(1);
+        Row row1 = sheet.createRow(position++);
         Cell cell12 = row1.createCell(2);
         Cell cell14 = row1.createCell(4);
         cell12.setCellValue("Директор");
         cell12.setCellStyle(styleBold);
         cell14.setCellValue("Місько В.І.");
         cell14.setCellStyle(styleBold);
+        position++;
 
-        Row row3 = sheet.createRow(3);
+        Row row3 = sheet.createRow(position++);
         Cell cell30 = row3.createCell(0);
         cell30.setCellValue("Акт переробки сировини");
         CellStyle styleCenter30 = cell30.getSheet().getWorkbook().createCellStyle();
@@ -198,17 +145,18 @@ public class WriteToExcel {
 
         sheet.addMergedRegion(new CellRangeAddress(3, 3, 0, 5));
 
-        Row row4 = sheet.createRow(4);
+        Row row4 = sheet.createRow(position++);
         Cell cell40 = row4.createCell(0);
         cell40.setCellValue(recordImport.getPartner());
 
-        Row row5 = sheet.createRow(5);
+        Row row5 = sheet.createRow(position++);
         Cell cell50 = row5.createCell(0);
         cell50.setCellValue(recordImport.getOriginDocument());
         Cell cell53 = row5.createCell(3);
         cell53.setCellValue("Дата переробки");
+        position++;
 
-        Row row7 = sheet.createRow(7);
+        Row row7 = sheet.createRow(position++);
         Cell cell70 = row7.createCell(0);
         cell70.setCellValue("Бочки");
         Cell cell73 = row7.createCell(3);
@@ -216,22 +164,19 @@ public class WriteToExcel {
 
         List<Raw> rawList = recordImport.getRawList();
 
-        Row row8 = sheet.createRow(8);
+        Row row8 = sheet.createRow(position++);
         Cell cell80 = row8.createCell(0);
         cell80.setCellValue(rawList.get(0).getRaw());
         Cell cell85 = row8.createCell(5);
         cell85.setCellValue(rawList.get(0).getCount());
         sum += rawList.get(0).getCount();
         if (rawList.size() > 1) {
-            Row row9 = sheet.createRow(9);
-            Cell cell90 = row9.createCell(0);
-            cell90.setCellValue(rawList.get(1).getRaw());
-            Cell cell95 = row9.createCell(5);
-            cell95.setCellValue(rawList.get(1).getCount());
-            sum += rawList.get(1).getCount();
+            for (int i = 1; i < rawList.size(); i++) {
+                sum += addRawInfo(sheet, position++, rawList.get(i));
+            }
         }
 
-        Row row100 = sheet.createRow(10);
+        Row row100 = sheet.createRow(position++);
         Cell cell100 = row100.createCell(0);
         Cell cell101 = row100.createCell(1);
         Cell cell102 = row100.createCell(2);
@@ -257,14 +202,28 @@ public class WriteToExcel {
         cell104.setCellStyle(styleCenter100);
         cell105.setCellValue("кг");
         cell105.setCellStyle(styleCenter100);
-        return sum;
+        report.setSum(sum);
+        report.setRowNumber(position);
     }
 
-    private static int addRowsToReport(XSSFSheet sheet, RecordImport recordImport, double sum, String fileName) {
-        int position = 11;
+    private static double addRawInfo(XSSFSheet sheet, int position, Raw raw) {
+        Row row = sheet.createRow(position);
+        Cell cell0 = row.createCell(0);
+        cell0.setCellValue(raw.getRaw());
+        Cell cell5 = row.createCell(5);
+        cell5.setCellValue(raw.getCount());
+        return raw.getCount();
+    }
+
+    private static void addRowsToReport(OrderReport report) {
+        RecordImport recordImport = report.getRecordImport();
+        XSSFSheet sheet = report.getSheet();
+        List<RecordImport> reportData = report.getReportData();
+        String fileName = report.getFile().getAbsolutePath();
+        int position = report.getRowNumber();
         double allCount = 0.0;
         Set<LocalDate> dates = new HashSet<>();
-        for (RecordImport report : reportData) {
+        for (RecordImport data : reportData) {
             Row row = sheet.createRow(position++);
             Cell cell0 = row.createCell(0);
             Cell cell1 = row.createCell(1);
@@ -273,10 +232,10 @@ public class WriteToExcel {
             Cell cell4 = row.createCell(4);
             Cell cell5 = row.createCell(5);
 
-            cell0.setCellValue(report.getProduct());
-            cell2.setCellValue(report.getDate().format(formatter));
-            cell3.setCellValue(report.getCountResult());
-            cell5.setCellValue(report.getCount());
+            cell0.setCellValue(data.getProduct());
+            cell2.setCellValue(data.getDate().format(formatter));
+            cell3.setCellValue(data.getCountResult());
+            cell5.setCellValue(data.getCount());
 
             cell0.setCellStyle(getCellStyle(cell0));
             cell1.setCellStyle(getCellStyle(cell1));
@@ -285,8 +244,8 @@ public class WriteToExcel {
             cell4.setCellStyle(getCellStyle(cell4));
             cell5.setCellStyle(getCellStyle(cell5));
 
-            allCount += report.getCount();
-            dates.add(report.getDate());
+            allCount += data.getCount();
+            dates.add(data.getDate());
         }
         Row row = sheet.createRow(position++);
         Cell cell0 = row.createCell(0);
@@ -316,7 +275,9 @@ public class WriteToExcel {
         Cell cellLast = rowLast.createCell(0);
         cellLast.setCellValue("Технологічні відходи в т.ч. сіль");
         Cell cellSumLast = rowLast.createCell(5);
-        cellSumLast.setCellValue(sum - allCount);
+        double v = report.getSum() - allCount;
+        if (v < 0) System.out.println("Vidhody = " + v + ", file: " + report.getFile().getAbsolutePath());
+        cellSumLast.setCellValue(v);
 
         if (dates.size() > 0) {
             String first = dates.stream().min(Comparator.naturalOrder()).get().format(formatter);
@@ -325,13 +286,14 @@ public class WriteToExcel {
             cellDates.setCellValue(first + "-" + last);
             sheet.addMergedRegion(new CellRangeAddress(6, 6, 3, 4));
         } else {
-            System.out.println("no data in file: " + fileName);
             filesToDelete.add(fileName);
         }
-        return ++position;
+        report.setRowNumber(++position);
     }
 
-    private static void createReportFooter(int rowNumber, XSSFSheet sheet) {
+    private static void createReportFooter(OrderReport report) {
+        XSSFSheet sheet = report.getSheet();
+        int rowNumber = report.getRowNumber();
         Row rowPrepared = sheet.createRow(rowNumber + 2);
         Cell preparedCell = rowPrepared.createCell(0);
         preparedCell.setCellValue("Заступник директора по виробництву");
