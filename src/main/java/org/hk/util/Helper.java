@@ -28,6 +28,6 @@ public class Helper {
         long minutes = TimeUnit.MILLISECONDS.toMinutes(millis);
         String time = String.format("%d minutes %d seconds", minutes,
                 TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(minutes));
-        System.out.printf("Time taken: %s%n", time);
+        System.out.printf("Completed. Time taken: %s%n", time);
     }
 }

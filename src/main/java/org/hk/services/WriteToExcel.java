@@ -25,8 +25,10 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.hk.util.Helper.DIR_IMP;
@@ -41,16 +43,17 @@ public class WriteToExcel {
     private static final Set<String> filesToDelete = new HashSet<>();
     private static final String FILE_SEPARATOR = "/";
     private static final String SUFFIX = ".xlsx";
+    public static final Map<String, Double> mapWastes = new HashMap<>();
 
     public static void write() {
         deleteFile(new File(DIR_IMP));
         createAndSaveReport();
-        filesToDelete.forEach(System.out::println);
-        filesToDelete.parallelStream().map(File::new).forEach(Helper::deleteFile);
     }
 
     private static void createAndSaveReport() {
         getRecords().parallelStream().filter(r -> r.getProduct() != null).forEach(WriteToExcel::saveReport);
+        deleteWrongFiles();
+        printMessageAboutMinusValues();
     }
 
     private static void saveReport(RecordImport recordImport) {
@@ -275,9 +278,9 @@ public class WriteToExcel {
         Cell cellLast = rowLast.createCell(0);
         cellLast.setCellValue("Технологічні відходи в т.ч. сіль");
         Cell cellSumLast = rowLast.createCell(5);
-        double v = report.getSum() - allCount;
-        if (v < 0) System.out.println("Vidhody = " + v + ", file: " + report.getFile().getAbsolutePath());
-        cellSumLast.setCellValue(v);
+        double waste = report.getSum() - allCount;
+        mapWastes.put(report.getFile().getAbsolutePath(), waste);
+        cellSumLast.setCellValue(waste);
 
         if (dates.size() > 0) {
             String first = dates.stream().min(Comparator.naturalOrder()).get().format(formatter);
@@ -339,5 +342,19 @@ public class WriteToExcel {
     private static void setCenterInStyle(CellStyle style) {
         style.setAlignment(HorizontalAlignment.CENTER);
         style.setVerticalAlignment(VerticalAlignment.CENTER);
+    }
+
+    private static void deleteWrongFiles() {
+        System.out.println("------------ Files to delete: ------------------");
+        filesToDelete.forEach(System.out::println);
+        filesToDelete.parallelStream().map(File::new).forEach(Helper::deleteFile);
+    }
+
+    private static void printMessageAboutMinusValues() {
+        System.out.println("------ Прихідні накладні в яких відходи від'ємні: -------------");
+        mapWastes.entrySet().stream()
+                .filter(e -> e.getValue() < 0)
+                .forEach(System.out::println);
+        System.out.println("---------------------------------------------------------------");
     }
 }

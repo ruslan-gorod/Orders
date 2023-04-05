@@ -14,8 +14,6 @@ public class AppImport {
         WorkWithDB.writeRecords(ReadFromExcel.read());
         WriteToExcel.write();
 
-        System.out.println("Completed");
-
         printTime(startLocalDateTime);
         HibernateUtil.shutdown();
     }
